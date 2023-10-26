@@ -67,3 +67,26 @@ function example3(dt=0.01, potential=true)
     display(p)
     return usol
 end
+
+"""
+Now we have multiple particles.
+f: deterministic; global potential + interactions
+g: stochastic; brownian motion
+"""
+function example4(dt=0.01, n=2, potential=true)
+    # parameters
+    x₀ = rand(2*n)
+    tspan = (0.0, 1.0)
+
+    # ODE
+    f(x, p, t) = -x*potential
+    g(x, p, t) = 1
+
+    prob = SDEProblem(f, g, x₀, tspan)
+    sol = solve(prob, EM(), dt=dt)
+
+    usol = vecvec_to_mat(sol.u)
+    p = plot(usol[:, 1:2:end], usol[:,2:2:end], show=true)
+    display(p)
+    return usol
+end
