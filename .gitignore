@@ -23,4 +23,12 @@ docs/site/
 # environment.
 Manifest.toml
 
+# macos files
 .DS_store
+
+# my hidden files
+-*
+
+# output
+*.gif
+*.mov
