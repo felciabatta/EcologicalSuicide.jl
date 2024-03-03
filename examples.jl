@@ -17,10 +17,9 @@ function example1(dt=0.01)
     g(u, p, t) = 1
 
     prob = SDEProblem(f, g, u₀, tspan)
-    sol = solve(prob, EM(), dt=dt)
-    plot(sol)
+    sol = solve(prob, EM(); dt=dt)
+    return plot(sol)
 end
-
 
 """
     example2(dt=0.01)
@@ -37,9 +36,9 @@ function example2(dt=0.01)
     g(u, p, t) = 1
 
     prob = SDEProblem(f, g, u₀, tspan)
-    sol = solve(prob, EM(), dt=dt)
+    sol = solve(prob, EM(); dt=dt)
 
-    plot(sol)
+    return plot(sol)
 end
 
 """
@@ -55,16 +54,13 @@ function example3(dt=0.01, potential=true)
     g(u, p, t) = 1
 
     prob = SDEProblem(f, g, u₀, tspan)
-    sol = solve(prob, EM(), dt=dt)
+    sol = solve(prob, EM(); dt=dt)
 
     usol = vecvec_to_mat(sol.u)
-    p = plot(usol[:, 1], usol[:, 2], show=true)
+    p = plot(usol[:, 1], usol[:, 2]; show=true)
     display(p)
     return usol
 end
-
-cat3(x...) = cat(x..., dims=3)
-
 
 """
     example4(
@@ -103,7 +99,7 @@ function example4(
     g(u, p, t) = 1
 
     prob = SDEProblem(f, g, u₀, tspan)
-    sol = solve(prob, solver, dt=dt)
+    sol = solve(prob, solver; dt=dt)
     println("SDE Solved!")
     usol = reduce(vcat, sol.u)
 
@@ -119,7 +115,6 @@ function example4(
         return usol, p
     end
 end
-
 
 """
     example5(
@@ -160,10 +155,10 @@ function example5(
     u₀ = [p₀[:]; c₀[:]]
 
     # ODE
-    f, g, xgrid = active_brownian_system(K, width, N, Dp=Dp, Dc=Dc, μ=μ, γ=γ)
+    f, g, xgrid = active_brownian_system(K, width, N; Dp=Dp, Dc=Dc, μ=μ, γ=γ)
 
     prob = SDEProblem(f, g, u₀, tspan)
-    sol = solve(prob, solver, dt=dt, saveat=savedt, dense=false)
+    sol = solve(prob, solver; dt=dt, saveat=savedt, dense=false)
     println("SDE Solved!")
     usol = reduce(cat3, sol.u)
     psol = reshape(usol[1:K*2, :, :], 2, K, :)
@@ -180,4 +175,38 @@ function example5(
         display(p)
         return psol, csol, sol, p
     end
+end
+
+function example6(
+    tend=1.0,
+    dt=0.01,
+    savedt=5dt;
+    solver::AbstractSDEAlgorithm=SOSRA(),
+    u₀,
+    par,
+)
+    prob = SDEProblem(activebrownian!, randombrownian!, u₀, (0.0, tend), par)
+    sol = solve(prob, solver; dt=dt, saveat=savedt, dense=false)
+
+    println("SDE Solved!")
+
+    return sol
+end
+
+function systemsetup(nparticles=10, nsteps=50, width::Float64=20.0)
+    ndim = 2
+    grid = PeriodicLattice((-width / 2, width / 2), nsteps, ndim, 1)
+    abp = ActiveBrownianParticleSpec()
+    chem = DiffusiveChemicalSpec()
+    gauss = GaussianSpec()
+    # absystem = ActiveBrownianSystemSpec(nparticles, grid)
+    wch = WCACache(ndim, nparticles)
+    dch = DiffusionCache(grid, nparticles)
+
+    c₀ = zero(dch.cₓₓ)
+    p₀ = grid.xlength * (rand(ndim, nparticles) .- 0.5)
+
+    par = (wcache=wch, dcache=dch, abp=abp, chem=chem, gauss=gauss, grid=grid)
+    u₀ = ArrayPartition(p₀, c₀)
+    return (; u₀, par)
 end

@@ -1,35 +1,96 @@
 """
-    ∂ᵣwca(r, σ=1, ε=1)
-
-TBW
+Equation terms used for particle dynamics.
 """
-function ∂ᵣwca(r, σ=1, ε=1)
-    r_crit = 2^(1 / 6) * σ
-    cutoff_filter = r .< r_crit
-    q = σ ./ r
-    return @. -24ε * (2q^12 - q^6) / r * cutoff_filter
+
+# abstract type AbstractCache end
+
+struct WCACache{T <: Real, N, M}
+    r::Array{T, N}              # ∇wca return array
+    pij::Array{T, M}            # displacement array
+    dij::Array{T, N}            # distances array
+    cutoff::Array{T, N}         # rcrit cutoff array
+    q::Array{T, N}              # ∂wca quotient term
 end
 
 """
-    ∇wca(x, σ=1, ε=1)
+    WCACache(ndim::Integer, nparticle::Integer)
 
-TBW
+Create a WCACache
 """
-function ∇wca(x::Array{<:Real, 3}, σ=1, ε=1)
-    xij = x .- (xᵥ = permutedims(x, (3, 2, 1)))
-    r = pairwise(euclidean, xᵥ[:, :], dims=1)
-    n = size(r)[1]
-    r = reshape(r, n, 1, n)
+WCACache(ndim::Integer, nparticle::Integer) = WCACache(
+    zeros(Float64, ndim, nparticle),
+    zeros(Float64, ndim, nparticle, nparticle),
+    ((); dij = zeros(Float64, nparticle, nparticle)),
+    fill!(similar(dij), 0),
+    fill!(similar(dij), 0),
+)
 
-    x̂ij = xij ./ r
-    # foreach(normalize!, eachrow(𝐫)) # NOT WORK FOR 3D apparently
-    return nansum(∂ᵣwca(r, σ, ε) .* x̂ij, dims=1)
+function ∂wca!(ch::WCACache, abp::ActiveBrownianParticleSpec)
+    # convenience pointers
+    cutoff, dij, q = ch.cutoff, ch.dij, ch.q
+    @. cutoff = @fastmath dij < abp.rcrit
+    @. q = @fastmath (abp.σ / dij)^6
+    @. dij = @fastmath -24abp.ε * 2q * (q - 1) / dij * cutoff
+    return nothing
 end
 
-# TODO: add WCA force for boundaries, to prevent escap!
+function distances!(ch::WCACache)
+    pij, dij = ch.pij, ch.dij
+    @inbounds for i ∈ axes(pij, 2), j ∈ axes(pij, 3)
+        @views @fastmath dij[i, j] = √(pij[1, i, j]^2 + pij[2, i, j]^2)
+    end
+end
+
+"""
+    displacements!(p::AbstractArray)
+
+Compute pairwise displacement vectors.
+"""
+function displacements!(r::AbstractArray, p::AbstractArray)
+    @inbounds for dim ∈ axes(p, 1), i ∈ axes(p, 2), j ∈ axes(p, 2)
+        @views r[dim, i, j] = p[dim, j] - p[dim, i]
+    end
+end
+
+function normalize!(ch::WCACache)
+    dij, pij = ch.dij, ch.pij
+    @inbounds for dim ∈ axes(pij, 1), i ∈ axes(pij, 2), j ∈ axes(pij, 3)
+        @views pij[dim, i, j] = pij[dim, i, j] / dij[i, j]
+    end
+end
+
+function nansumforces!(ch::WCACache)
+    r, mag, dirvec = ch.r, ch.dij, ch.pij
+    fill!(r, 0)
+    @inbounds for dim ∈ axes(r, 1), i ∈ axes(r, 2), j ∈ axes(r, 2)
+        @views r[dim, i] +=
+            isnan(mag[i, j]) ? 0 : @fastmath mag[i, j] * dirvec[dim, i, j]
+    end
+    return nothing
+end
+
+function ∇wca!(ch::WCACache, p::AbstractArray, abp::ActiveBrownianParticleSpec)
+    # convenience pointers
+    pij = ch.pij
+    # pairwise displacement vectors
+    displacements!(pij, p)
+    # pairwise distances
+    distances!(ch)
+    # normalize displacements
+    normalize!(ch)
+    # find force magnitudes (∂/∂r)
+    ∂wca!(ch, abp)
+    # sum of magnitudes*direction vectors
+    nansumforces!(ch)
+    return nothing
+end
+
+#############################################################################
+
+#############################################################################
 
 function ∇C_simple(x, x₁, x₂, c₁, c₂)
-    [(c₂ - c₁) / (x₂ - x₁);; 0]
+    return [(c₂ - c₁) / (x₂ - x₁);; 0]
 end
 
 """
@@ -47,9 +108,10 @@ Calculate `∇c` at some arbitrary point `p`.
 2. Get interpolated gradient for `p`.
 
 """
-function ∇c(c::Matrix{<:Real}, p; x)
+function ∇c(c::AbstractArray, p; grid)
+    x = grid.xrange
     # interpolate
     c_itp = cubic_spline_interpolation((x, x), c)
     # for specific p, first
-    ∇c_itp = gradient(c_itp, p...)
+    return gradient(c_itp, p...)
 end
